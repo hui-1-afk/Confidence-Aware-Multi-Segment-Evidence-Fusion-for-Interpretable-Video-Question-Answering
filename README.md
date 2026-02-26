@@ -1,0 +1,2 @@
+# Confidence-Aware-Multi-Segment-Evidence-Fusion-for-Interpretable-Video-Question-Answering
+We propose an innovative strategy for the VideoMind model: proactively exploring and analyzing in depth the value of the answer with the second-highest confidence ranking. Through targeted improvements to the VideoMind architecture, we use this 'second choice' as a key probe for detecting the model’s internal decision-making mechanism.
