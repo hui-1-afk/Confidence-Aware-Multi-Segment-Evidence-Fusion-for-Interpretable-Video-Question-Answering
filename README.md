@@ -1,253 +1,294 @@
-# Confidence-Aware-Multi-Segment-Evidence-Fusion-for-Interpretable-Video-Question-Answering
-This project implements a **Confidence-Aware Multi-Segment Evidence Fusion Model** for Video Question Answering (VideoQA), which optimizes the VideoMind framework by introducing a Fusioner module to realize multi-segment collaborative reasoning. The model breaks through the limitation of single-segment decision-making in traditional VideoQA, effectively improves the accuracy, robustness and interpretability of long video understanding, and has outstanding performance on multiple mainstream VideoQA benchmarks.
-We propose an innovative strategy for the VideoMind model: proactively exploring and analyzing in depth the value of the answer with the second-highest confidence ranking. Through targeted improvements to the VideoMind architecture, we use this 'second choice' as a key probe for detecting the model’s internal decision-making mechanism.
+# Confidence-Aware Top-2 Temporal Hypothesis Fusion for Long-Video Question Answering
 
-## Project Overview
-### Core Motivation
-Traditional VideoQA models rely on single high-confidence video segments for decision-making, which is prone to accidental errors due to missing key information; at the same time, the lack of effective multi-segment evidence fusion and result traceability mechanisms leads to poor model interpretability and difficult error iteration.
+This repository accompanies the paper **“Confidence-Aware Top-2 Temporal Hypothesis Fusion for Long-Video Question Answering”**.
 
-### Core Innovation
-Based on the **Chain-of-LoRA** long video reasoning framework of VideoMind, a **Multi-segment Evidence Fusioner** is added, and three core mechanisms are designed to solve the above problems:
-1. **Timestamp Association**: Bind answers to the time segment timestamps of video features, clarify the spatiotemporal source of answers, and provide a basis for error analysis.
-2. **Multi-Candidate Fusion**: Retain top-N high-confidence video segments to supplement complementary information and reduce single decision-making errors.
-3. **Case-based Decision-Making**: Design differentiated fusion rules according to the consistency of candidate segment answers, balance decision-making efficiency and result accuracy.
+Long-video question answering (VideoQA) requires both accurate temporal grounding and reliable reasoning over evidence that may be temporally dispersed. Existing modular pipelines typically collapse the verifier output to a single top-ranked segment for answer generation. While efficient, this strategy becomes fragile when residual temporal ambiguity remains after verification.
 
-### Model Architecture
-The model reuses the Qwen2-VL as the unified backbone network, and realizes the function switching of five core modules by loading independent LoRA adapters (rank=64). The reasoning pipeline is as follows:
-1. **Planner**: Generate role calling plan according to question type and video content (supports Localization+Answer/Localization Only/Answer Only three modes).
-2. **Grounder**: Localize the relevant time segments of the video and predict candidate time windows combined with the special token `<REG>`.
-3. **Verifier**: Re-verify the confidence of candidate segments (binary classification task), expand the boundary by 50% and add `<SEG_START>/<SEG_END>` tokens, and retain top-N high-confidence segments.
-4. **Fusioner** (core innovation): Fuse multi-segment multi-modal features (visual/text/confidence score) through **Question-Guided Cross-Segment Attention**, generate global evidence representation, and support evidence summary text output.
-5. **Answerer**: Generate the final natural language answer under the constraint of global evidence, and reduce reasoning difficulty through feature-level fusion of multi-segment information.
+To address this limitation, we propose a **confidence-aware top-2 temporal hypothesis fusion method** for long-video VideoQA. Instead of collapsing the verifier output to a single surviving segment, the proposed method preserves the **two highest-ranked verified moments** as a bounded competing pair and introduces a lightweight **Fusioner** that performs:
 
-## Environmental Requirements
-### Hardware Requirements
-- Training: 8 × NVIDIA H100 80GB HBM3 GPUs (distributed training/inference), or other multi-card GPU clusters with single card ≥16GB video memory
-- Inference: CPU/single GPU (video memory ≥8GB)
-- Optional: Huawei NPU (need to enable the corresponding torch-npu dependency)
+- **overlap-aware deduplication**
+- **confidence-aware feature construction**
+- **question-guided interaction**
 
-### Software Requirements
-- Python: 3.9+ (recommended 3.9/3.10, compatible with all dependent versions)
-- CUDA/CUDNN: Match the PyTorch 2.4.0 version (recommended CUDA 12.1+)
-- Dependencies: See `requirements.txt` for the complete specified version (the project has fixed the version to solve the compatibility problems of Gradio/Deepspeed/PyTorch)
+before answer decoding.
 
-## Environment Installation
-### 1. Clone the project
-```bash
-git clone <project-repo-url>
-cd Confidence-Aware-Multi-Segment-Fusion-VideoQA
-```
+In this way, residual competition between plausible temporal evidences is resolved at the **evidence level** rather than through brittle top-1 commitment.
 
-### 2. Create a virtual environment (recommended)
-```bash
-# Conda creation (recommended)
-conda create -n fusion-videoqa python=3.10
-conda activate fusion-videoqa
+**Code, models, and data:**  
+https://github.com/hui-1-afk/Confidence-Aware-Multi-Segment-Evidence-Fusion-for-Interpretable-Video-Question-Answering.git
 
-# Or venv creation
-python -m venv fusion-videoqa
-# Linux/macOS activation
-source fusion-videoqa/bin/activate
-# Windows activation
-fusion-videoqa\Scripts\activate
-```
+---
 
-### 3. Install dependent packages
-Install all specified version dependencies to avoid version conflicts:
-```bash
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
+## 1. Overview
 
-### 4. NPU environment adaptation (optional)
-If using Huawei NPU, modify the `requirements.txt` file to comment out the default PyTorch and enable the NPU exclusive version:
-```txt
-# torch==2.4.0
-# torchvision==0.19.0
-torch==2.4.0+cpu
-torch-npu==2.4.0.post2
-torchvision==0.19.0+cpu
-```
-Then re-execute the dependency installation command.
+In long-video VideoQA, a common design is **single-segment reasoning**, where the temporally localized segment with the highest confidence score is selected as the sole evidence for answer generation. This strategy is efficient, but it is fundamentally limited in videos containing:
 
-## Dataset Preparation
-The model is evaluated on 5 representative long/short video understanding benchmarks, and the official download addresses are as follows:
-1. **Video-MME**: Long video QA dataset (avg. 15 mins), [Official Link](https://github.com/OpenGVLab/Video-MME)
-2. **MVBench**: Multi-task short video benchmark (20 tasks, avg. 15s), [Official Link](https://github.com/OpenGVLab/MVBench)
-3. **NExT-GQA**: Spatiotemporal causal reasoning grounded QA (avg. 39.5s), [Official Link](https://github.com/Next-GQA/NExT-GQA)
-4. **MLVU**: Multi-task long video understanding benchmark (avg. 15.5 mins), [Official Link](https://github.com/facebookresearch/MLVU)
-5. **LongVideoBench**: Long context video QA (8s ~ 1h), [Official Link](https://github.com/OpenGVLab/LongVideoBench)
+- multi-stage actions
+- temporally separated causal events
+- repeated or visually similar moments
+- partially complementary evidence distributed across time
 
-### Dataset Processing
-1. Download the original dataset and extract video/annotation files to the `data/` directory (create if not exists).
-2. Run the dataset preprocessing script to downsample videos (1 FPS by default) and generate timestamp annotations:
-   ```bash
-   python scripts/process_dataset.py --dataset <dataset-name> --data_root data/ --save_root data/processed/
-   ```
-3. The preprocessed dataset structure is as follows:
-   ```
-   data/processed/
-   ├── Video-MME/
-   │   ├── videos/ (downsampled video frames)
-   │   └── annotations/ (json format QA + timestamp)
-   └── ... (other datasets)
-   ```
+The top-ranked segment may be locally salient yet semantically incomplete, because prerequisite context or later outcomes may appear elsewhere in the video.
 
-## Model Running
-### 1. Pre-trained Model Download
-Download the pre-trained Qwen2-VL model (2B) and the LoRA adapters of each module of the project, and place them in the `ckpt/` directory:
-```bash
-mkdir -p ckpt/qwen2-vl-2b ckpt/lora_adapters
-# Download Qwen2-VL-2B (Hugging Face)
-git clone https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct ckpt/qwen2-vl-2b
-# Download project LoRA adapters
-wget <lora-adapters-url> -O ckpt/lora_adapters/fusion_lora.zip
-unzip ckpt/lora_adapters/fusion_lora.zip -d ckpt/lora_adapters/
-```
+Our method addresses this problem with a **bounded multi-hypothesis design**. Rather than keeping a large candidate pool, we retain only the **top-2 verified segments** and treat them as a structured pair of **competing temporal hypotheses**. The retained pair is then fused by a lightweight post-verification module before answer generation.
 
-### 2. Model Training
-The project adopts **frozen backbone + LoRA fine-tuning** strategy: freeze Planner/Grounder/Verifier, only train the LoRA parameters of Fusioner and Answerer.
-```bash
-# Single machine multi-card training (8 GPUs by default)
-accelerate launch --num_processes=8 train.py \
-  --model_path ckpt/qwen2-vl-2b \
-  --lora_path ckpt/lora_adapters \
-  --data_root data/processed/ \
-  --dataset NExT-GQA \
-  --batch_size 32 \
-  --lr 2e-5 \
-  --epochs 1 \
-  --save_dir ckpt/trained/
-```
-**Key Training Parameters**:
-- `--num_processes`: Number of GPUs for distributed training
-- `--batch_size`: Batch size (32 for 8 H100 GPUs)
-- `--lr`: Initial learning rate (2e-5 for AdamW optimizer)
-- `--epochs`: Training epochs (1 epoch for the project by default)
-- `--save_dir`: Trained model/LoRA adapter save directory
+---
 
-### 3. Model Inference
-#### Single Sample Inference
-Run the single sample inference script to test the video QA effect and output the answer + corresponding time segment + confidence score:
-```bash
-python infer_single.py \
-  --model_path ckpt/qwen2-vl-2b \
-  --lora_path ckpt/trained/ \
-  --video_path examples/sample_video.mp4 \
-  --question "Why are the bunnies gathering on the table?"
-```
-**Output Example**:
-```
-Final Answer: Because a boy is sitting aside and handing out food to the bunnies.
-Relevant Time Segments: [10,23], [15,76] (confidence: 0.52, 0.47)
-Evidence Summary: The bunny gathering behavior appears in segment [10,23], and a boy feeding food is observed in segment [15,76].
-```
+## 2. Main Contributions
 
-#### Benchmark Evaluation
-Evaluate the model performance on the specified benchmark and generate the accuracy report:
-```bash
-python eval_benchmark.py \
-  --model_path ckpt/qwen2-vl-2b \
-  --lora_path ckpt/trained/ \
-  --data_root data/processed/ \
-  --dataset NExT-GQA \
-  --save_result results/next_gqa_result.json
-```
+The main contributions of this work are:
 
-### 4. Gradio Visual Demo (Optional)
-The project integrates Gradio to build a visual interactive interface, supporting video upload, question input and real-time QA:
-```bash
-python app_gradio.py \
-  --model_path ckpt/qwen2-vl-2b \
-  --lora_path ckpt/trained/
-```
-After running, open the local address (default `http://localhost:7860`) in the browser to operate, and support:
-- Video file upload (MP4 format)
-- Text question input
-- Real-time output of answers, relevant time segments, confidence scores and evidence summaries
-- Support Hugging Face Spaces deployment (rely on `spaces==0.34.0`)
+1. **Bounded post-verification uncertainty modeling**  
+   We reformulate residual post-verification uncertainty as a bounded competition between the two most plausible temporal hypotheses, moving ambiguity handling from post-hoc answer selection to evidence-level reasoning.
 
-## Experimental Results
-### Comprehensive Performance Comparison
-The model (VideoMind-Fusion, 2B) achieves significant performance improvements on multiple benchmarks compared with the original VideoMind (2B) and other mainstream VideoQA models (7B scale), and maintains stable performance on long video tasks. The key results are as follows (unit: %):
+2. **Lightweight top-2 fusion mechanism**  
+   We introduce a lightweight top-2 fusion mechanism that refines and fuses the retained evidence pair through overlap-aware processing, confidence-aware feature construction, and question-guided interaction.
 
-| Method               | Size | Video-MME | MVBench | MLVU  | NExT-GQA |
-|----------------------|------|-----------|---------|-------|----------|
-| Video-LLaVA          | 7B   | 41.1      | 43.0    | 29.3  | -        |
-| TimeChat             | 7B   | 34.3      | 38.5    | 30.9  | -        |
-| VideoMind (Original) | 2B   | 53.6      | 61.9    | 58.7  | 32.6     |
-| VideoMind (Reproduce)| 2B   | 53.15     | 48.8    | 56.68 | 66.6     |
-| **Ours (Fusion)**    | 2B   | 52.42     | 61.5     | 58.89 | **74.08** |
+3. **Plug-in post-verification upgrade**  
+   We present the proposed design as a plug-in post-verification upgrade for modular long-video QA pipelines and show, under matched within-backbone comparison, that bounded evidence-level fusion yields consistent gains on multiple evaluated benchmarks.
 
-### Ablation Experiment Results
-1. **Key Module Ablation** (NExT-GQA, %): The full model achieves the highest accuracy (74.45%), and the Verifier module contributes the most to the fusion effect.
-   | Configure   | Accuracy |
-   |-------------|----------|
-   | Vanilla     | 74.03    |
-   | w/o Planner | 74.33    |
-   | w/o Verifier| 74.15    |
-   | Full (Ours) | **74.45**|
+---
 
-2. **Fusion Strategy Ablation** (NExT-GQA, %): The **dynamic fusion strategy** (Softmax weight + consistency priority) proposed in the project outperforms single-segment/equal weight/hard selection strategies.
-   | Fusion Strategy       | Accuracy |
-   |-----------------------|----------|
-   | Top-1 Only            | 73.2     |
-   | Equal Weight          | 73.8     |
-   | Hard Selection        | 73.5     |
-   | Ours (Dynamic Fusion) | **74.1** |
+## 3. Method
 
-## Core Code Structure
-```
-Confidence-Aware-Multi-Segment-Fusion-VideoQA/
-├── ckpt/               # Pre-trained model + LoRA adapter storage
-├── data/               # Original/processed dataset storage
-├── examples/           # Test video/question examples
-├── models/             # Core model code
-│   ├── backbone.py     # Qwen2-VL backbone loading
-│   ├── planner.py      # Planner module (LoRA-P)
-│   ├── grounder.py     # Grounder module (LoRA-G)
-│   ├── verifier.py     # Verifier module (LoRA-V)
-│   ├── fusioner.py     # Fusioner module (LoRA-F, core innovation)
-│   └── answerer.py     # Answerer module
-├── scripts/            # Dataset preprocessing/utility scripts
-├── train.py            # Model training script
-├── infer_single.py     # Single sample inference script
-├── eval_benchmark.py   # Benchmark evaluation script
-├── app_gradio.py       # Gradio visual demo script
-├── requirements.txt    # Dependence list (specified version)
-└── README.md           # Project documentation
-```
+### 3.1 Inherited VideoMind-style backbone
 
-## Key Notes
-1. **Version Lock**: All dependencies in `requirements.txt` are specified with fixed versions to solve the compatibility problems of Gradio (#10662), Deepspeed (#6793) and PyTorch (#138386); the Transformers 4.45.2 version contains the project's custom patches, **do not upgrade at will**.
-2. **LoRA Adapter**: Each module uses an independent LoRA adapter (rank=64), which realizes function isolation and efficient fine-tuning, and the Fusioner module's LoRA-F is the core of the project.
-3. **Inference Efficiency**: The model retains the top 2 high-confidence segments by default for fusion (N'=2), which can be adjusted by the `--top_n` parameter in the script (increasing N' will improve accuracy but increase computational overhead).
-4. **Model Interpretability**: The Fusioner module supports the output of `evidence summary text`, which can be enabled by the `--enable_evidence` parameter in the inference/ demo script.
-5. **Safety**: The model uses `safetensors` for model weight storage, which avoids the security risks of pickle and has faster read/write speed.
+The overall system contains five components:
 
-## Common Problems
-1. **Dependency Installation Timeout**: Add the domestic PyPI source (`-i https://pypi.tuna.tsinghua.edu.cn/simple`) to the `pip install` command.
-2. **GPU Out of Memory**: Reduce the batch size (`--batch_size`), lower the LoRA rank, or enable DeepSpeed ZeRO optimization (add `--deepspeed configs/deepspeed.json` to the training command).
-3. **Gradio Startup Failure**: Check whether the pydantic version is 2.10.6, and reinstall the dependent package if necessary.
-4. **Video Preprocessing Error**: Ensure that the decord library is installed correctly (0.6.0), and the video format is MP4 (other formats can be converted by `ffmpeg`).
-5. **NPU Running Error**: Confirm that the torch-npu dependency is enabled correctly, and the NPU driver/ firmware is installed in accordance with the official documentation.
+1. **Planner**  
+   Determines the execution route.
 
-## Citation
-If this project is used in your research, please cite the relevant paper:
-```bibtex
-@article{fusion_videoqa_2025,
-  title={Confidence-Aware Multi-Segment Evidence Fusion for Interpretable Video Question Answering},
-  author={XXX},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
-  year={2025}
-}
-@article{videomind_2025,
-  title={VideoMind: A Chain-of-LoRA Agent for Long Video Reasoning},
-  author={Liu, Ye and Lin, Kevin Qinghong and Chen, Chang Wen and Shou, Mike Zheng},
-  journal={arXiv preprint arXiv:2503.13444},
-  year={2025}
-}
-```
+2. **Grounder**  
+   Generates candidate temporal moments relevant to the question.
 
-## Contact
-If you have any questions about the project, please submit an Issue to the project warehouse or contact the developer via email: `<544249092@qq.com>`.
-```
+3. **Verifier**  
+   Re-scores and ranks candidate temporal moments by confidence.
+
+4. **Fusioner**  
+   Operates on the retained top-2 verified segments to perform confidence-aware evidence fusion.
+
+5. **Answerer**  
+   Produces the final response from the fused representation.
+
+The main modification of this work is focused on the **post-verification transition from ranking to reasoning**.
+
+---
+
+### 3.2 Why top-2?
+
+A straightforward extension to single-segment reasoning is to retain multiple temporal candidates after verification. However, the key question is not simply whether more segments should be kept, but what constitutes the **smallest useful evidence set** for resolving residual temporal ambiguity.
+
+We therefore retain only:
+
+- **Top-1**: the dominant evidence branch
+- **Top-2**: the strongest remaining competing temporal hypothesis
+
+This retained pair is treated not as a generic multi-segment pool, but as the **smallest non-degenerate hypothesis set** in which evidence-level competition can still be explicitly represented and resolved.
+
+This design is motivated by both:
+
+- **structure**: the most informative residual ambiguity is often concentrated near the top of the verifier ranking
+- **efficiency**: adding more segments increases cross-segment interaction cost and brings in lower-confidence candidates that are more likely to be noisy, redundant, or semantically marginal
+
+---
+
+### 3.3 Fusioner
+
+The Fusioner transforms the retained pair into a single global evidence representation for answer generation. The post-verification workflow contains four stages:
+
+1. **Top-2 Retention**  
+   Keep the two highest-ranked verified segments.
+
+2. **Overlap-Aware Deduplication**  
+   Preserve the verifier-preferred segment and remove duplicated temporal support from the competing branch.
+
+3. **Confidence-Aware Cross-Hypothesis Interaction**  
+   Inject verifier confidence into the retained segment features and perform lightweight question-guided interaction.
+
+4. **Question-Guided Aggregation**  
+   Aggregate the interacted pair into a fused global evidence representation for the Answerer.
+
+This design generalizes single-segment reasoning as a special case: when the verifier strongly favors one segment, the fused representation naturally collapses toward the dominant branch; when the retained pair is close in confidence, both branches remain active and complementary temporal cues can be combined before decoding.
+
+---
+
+### 3.4 Efficiency
+
+Although the Fusioner introduces explicit cross-hypothesis reasoning, its cost remains bounded because it operates on only two retained segment representations.
+
+If the feature dimension is \(D\), the cross-hypothesis interaction complexity is:
+
+\[
+O(N'^2 D), \quad N' = 2
+\]
+
+By restricting interaction to the retained top-2 pair, the proposed design preserves the practical efficiency of top-ranked evidence selection while still enabling explicit hypothesis-level comparison under ambiguity.
+
+---
+
+## 4. Experimental Settings
+
+### Benchmarks
+
+We evaluate the proposed method on three representative benchmarks:
+
+- **MVBench**  
+  A benchmark covering 20 diverse video understanding tasks, with an average video duration of **15 seconds**.  
+  Metric: **Average Accuracy**
+
+- **NExT-QA**  
+  A VideoQA benchmark focusing on causal and temporal reasoning, with an average video duration of **39.5 seconds**.  
+  Metric: **Acc@QA**
+
+- **MLVU**  
+  A multi-task long-video understanding benchmark with an average duration of **15.5 minutes**.  
+  Metric: **Macro-average Accuracy (M-Avg)**
+
+### Implementation Details
+
+- Backbone: **Qwen2-VL 2B**
+- LoRA adapters: independent LoRA adapters with **rank 64** for Planner, Grounder, Verifier, Fusioner, and Answerer
+- Grounder decoder hidden dimension: **256**
+- Video sampling rate: **1 FPS**
+- Verifier temporal boundary expansion: **50%**
+- Special tokens: `<SEG_START>` and `<SEG_END>`
+- Retained clips after verification: **Top-2** (\(N' = 2\))
+- Fusion type: **query-guided cross-segment evidence fusion**
+- Frozen modules during training: **Planner, Grounder, Verifier**
+- Trainable modules during training: **Fusioner and Answerer LoRA parameters**
+- Optimizer: **AdamW**
+- Initial learning rate: **2 × 10⁻⁵**
+- Batch size: **32**
+- Training epochs: **1**
+- Temperature parameter in Eq. (12): fixed across experiments
+
+### Hardware Environment
+
+All experiments are conducted on a server with:
+
+- **8 × NVIDIA H100 80GB HBM3 GPUs**
+
+This hardware setup is used for throughput efficiency rather than being a strict requirement of the framework.
+
+---
+
+## 5. Main Results
+
+### 5.1 Comprehensive performance comparison
+
+Under the reported setting, the proposed fusion model improves all three reported benchmarks relative to the 2B VideoMind baseline.
+
+| Method | Size | MVBench | MLVU | NExT-QA |
+|---|---:|---:|---:|---:|
+| Video-LLaVA | 7B | 43.0 | 47.3 | 51.4 |
+| Otter | 9B | 40.5 | 41.2 | 59.1 |
+| TimeChat | 7B | 38.5 | 30.9 | 50.6 |
+| LongVA | 7B | - | 56.3 | 68.3 |
+| TinyLLaVA | 3B | 45.5 | 44.8 | 58.1 |
+| ST-LLM | 7B | 54.9 | - | - |
+| VideoGPT+ | 3.8B | 58.7 | - | - |
+| VideoChat2 | 7B | 60.4 | 47.9 | 68.6 |
+| VILA | 2.7B | 49.2 | 51.0 | 60.5 |
+| VideoMind | 2B | 48.8 | 56.7 | 66.6 |
+| **VideoMind (Fusion)** | **2B** | **61.5** | **58.9** | **74.5** |
+
+Compared with the 2B VideoMind baseline, the proposed fusion model improves:
+
+- **MVBench**: 48.8 → 61.5 (**+12.7**)
+- **MLVU**: 56.7 → 58.9 (**+2.2**)
+- **NExT-QA**: 66.6 → 74.5 (**+7.9**)
+
+These results suggest that bounded top-2 fusion is particularly effective when answer generation depends on stronger temporal disambiguation and complementary evidence integration.
+
+> Note: publicly reported results from other methods are provided for broader context only. The central empirical claim of this work is the **matched within-backbone comparison** between the inherited 2B VideoMind baseline and its fusion-based variant under aligned implementation settings.
+
+---
+
+### 5.2 Key module ablation
+
+Results on the NExT-QA validation set:
+
+| Setting | Accuracy (%) |
+|---|---:|
+| Frozen-score Fusion | 74.03 |
+| w/o Verifier | 74.15 |
+| w/o Planner | 74.33 |
+| **Full (Ours)** | **74.45** |
+
+The full model achieves the highest accuracy. Removing the Verifier reduces performance, indicating that confidence re-scoring remains important for the quality of the retained evidence pair. Removing the Planner causes only a small drop, which is consistent with the fact that the main contribution of this work lies after verification rather than in routing itself.
+
+---
+
+### 5.3 Fusion strategy ablation
+
+Different fusion strategies on the NExT-QA validation set:
+
+| Fusion Strategy | Accuracy (%) |
+|---|---:|
+| Top-1 Only | 73.2 |
+| Hard Selection | 73.5 |
+| Equal Weight | 73.8 |
+| **Ours** | **74.1** |
+
+Dynamic confidence-aware fusion achieves the best accuracy, outperforming both hard selection and simple averaging.
+
+---
+
+### 5.4 Retained candidate count analysis
+
+To validate the bounded top-2 design, we compare Top-1+Top-2, Top-1+Top-3, Top-1+Top-4, and Top-1+Top-5 on the NExT-QA validation set.
+
+| Task | Samples | Baseline | Ours | Top1+Top3 | Top1+Top4 | Top1+Top5 |
+|---|---:|---:|---:|---:|---:|---:|
+| CH | 683 | 65.59 | 73.36 | 72.77 | 68.10 | 64.79 |
+| CW | 1924 | 67.34 | 75.33 | 75.27 | 67.19 | 66.66 |
+| DC | 177 | 56.96 | 63.72 | 61.90 | 58.53 | 56.27 |
+| DL | 295 | 82.57 | 92.37 | 92.51 | 91.83 | 81.27 |
+| DO | 305 | 72.25 | 80.83 | 80.65 | 75.44 | 71.10 |
+| TC | 663 | 67.28 | 75.27 | 74.66 | 72.26 | 66.88 |
+| TN | 895 | 60.22 | 67.36 | 67.22 | 60.21 | 59.88 |
+| TP | 54 | 62.79 | 70.24 | 68.24 | 60.87 | 58.77 |
+| **ACC** | **4996** | **66.60** | **74.50** | **74.20** | **68.32** | **65.90** |
+
+The proposed **Top-1+Top-2** setting achieves the best overall accuracy and performs best on **7 out of 8** task categories. This supports the claim that the most useful residual ambiguity is usually concentrated near the top of the verifier ranking, while lower-ranked candidates are more likely to introduce redundant or weakly relevant evidence.
+
+---
+
+## 6. Qualitative Observations
+
+The paper further provides qualitative case studies showing that the second-ranked segment can remain semantically useful rather than redundant. Representative cases include:
+
+- **transition-to-outcome continuity**
+- **direct evidence followed by later confirmation**
+- **interference-sensitive cases**, where the retained pair helps suppress distractors and aggregate semantically consistent clues
+
+These examples support the motivation for retaining the top-2 verified segments under temporal ambiguity.
+
+---
+
+## 7. Conclusion
+
+This work focuses on the post-verification transition in long-video question answering, where existing pipelines often commit too early to a single top-ranked segment for answer generation. We show that this hard top-1 decision is brittle when meaningful temporal ambiguity remains near the top of the verifier ranking.
+
+To address this issue, we introduce a confidence-aware top-2 fusion framework that preserves the strongest competing segment and resolves the retained ambiguity before decoding through a lightweight post-verification Fusioner. Under the matched within-backbone setting, the proposed design consistently improves over the inherited VideoMind baseline on MVBench, MLVU, and NExT-QA, with especially clear gains on MVBench and NExT-QA.
+
+These results support bounded top-2 fusion as an effective compromise between ambiguity preservation and reasoning efficiency in temporally dispersed VideoQA.
+
+---
+
+## 8. Paper Information
+
+**Title**  
+Confidence-Aware Top-2 Temporal Hypothesis Fusion for Long-Video Question Answering
+
+**Authors**  
+Mangang Xie, Hui Zhang, Quan Wan, Jisheng Dang, Bimei Wang, Jie Xu, Juanjuan Jing
+
+---
+
+## 9. Citation
+
+If you find this repository useful, please cite the corresponding paper:
+
+**Confidence-Aware Top-2 Temporal Hypothesis Fusion for Long-Video Question Answering**  
+Mangang Xie, Hui Zhang, Quan Wan, Jisheng Dang, Bimei Wang, Jie Xu, Juanjuan Jing
